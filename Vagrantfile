@@ -1,14 +1,15 @@
-# -*- mode: ruby -*-
+ # -*- mode: ruby -*-
 # vi: set ft=ruby :
+require 'net/http'
+require 'json'
 
 require_relative 'vagrant_rancheros_guest_plugin.rb'
 
 # To enable rsync folder share change to false
 $rsync_folder_disabled = true
-$number_of_nodes = 1
+$number_of_nodes = ENV['nodes'].to_i || 1
 $vm_mem = "1024"
 $vb_gui = false
-
 
 # All Vagrant configuration is done below. The "2" in Vagrant.configure
 # configures the configuration version (we support older styles for
@@ -18,7 +19,32 @@ Vagrant.configure(2) do |config|
   config.vm.box   = "rancherio/rancheros"
   config.vm.box_version = ">=0.4.1"
 
-  (1..$number_of_nodes).each do |i|
+  (1..1).each do |i|
+    hostname = "rancher-%02d" % i
+
+    config.vm.define hostname, primary: true do |node|
+        node.vm.provider "virtualbox" do |vb|
+            vb.memory = $vm_mem
+            vb.gui = $vb_gui
+        end
+
+        ip = "172.19.8.#{i+100}"
+        node.vm.network "private_network", ip: ip
+        node.vm.hostname = hostname
+
+        # Disabling compression because OS X has an ancient version of rsync installed.
+        # Add -z or remove rsync__args below if you have a newer version of rsync on your machine.
+        node.vm.synced_folder ".", "/opt/rancher", type: "rsync",
+            rsync__exclude: ".git/", rsync__args: ["--verbose", "--archive", "--delete", "--copy-links"],
+            disabled: $rsync_folder_disabled
+
+        node.vm.network "forwarded_port", guest: 8080, host: 8080
+        node.vm.provision "shell", path: "master.sh"
+        node.vm.provision "shell", path: "slave.sh"
+        node.vm.provision "shell", inline: "sudo hostname #{hostname}"
+    end
+  end
+  (2..$number_of_nodes).each do |i|
     hostname = "rancher-%02d" % i
 
     config.vm.define hostname do |node|
@@ -37,6 +63,8 @@ Vagrant.configure(2) do |config|
             rsync__exclude: ".git/", rsync__args: ["--verbose", "--archive", "--delete", "--copy-links"],
             disabled: $rsync_folder_disabled
 
+        node.vm.provision "shell", inline: "sudo hostname #{hostname}"
+        node.vm.provision "shell", path: "slave.sh"
     end
   end
 end
